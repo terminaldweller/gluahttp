@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/yuin/gopher-lua"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"time"
+
+	lua "github.com/yuin/gopher-lua"
 )
 
 type httpModule struct {
@@ -18,6 +21,30 @@ type httpModule struct {
 type empty struct{}
 
 func NewHttpModule(client *http.Client) *httpModule {
+	var proxyString string
+	if os.Getenv("ALL_PROXY") != "" {
+		proxyString = os.Getenv("ALL_PROXY")
+	} else if os.Getenv("HTTPS_PROXY") != "" {
+		proxyString = os.Getenv("HTTPS_PROXY")
+	} else if os.Getenv("HTTP_PROXY") != "" {
+		proxyString = os.Getenv("HTTP_PROXY")
+	} else if os.Getenv("https_proxy") != "" {
+		proxyString = os.Getenv("https_proxy")
+	} else if os.Getenv("http_proxy") != "" {
+		proxyString = os.Getenv("http_proxy")
+	}
+
+	if proxyString != "" {
+		proxyUrl, err := url.Parse(proxyString)
+		if err == nil {
+			proxyTransport := &http.Transport{
+				Proxy: http.ProxyURL(proxyUrl),
+			}
+
+			client.Transport = proxyTransport
+		}
+	}
+
 	return NewHttpModuleWithDo(client.Do)
 }
 
@@ -176,7 +203,7 @@ func (h *httpModule) doRequest(L *lua.LState, method string, url string, options
 		case lua.LString:
 			body := reqBody.String()
 			req.ContentLength = int64(len(body))
-			req.Body = ioutil.NopCloser(strings.NewReader(body))
+			req.Body = io.NopCloser(strings.NewReader(body))
 		}
 
 		reqTimeout := options.RawGet(lua.LString("timeout"))
@@ -221,7 +248,7 @@ func (h *httpModule) doRequest(L *lua.LState, method string, url string, options
 	}
 
 	defer res.Body.Close()
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 
 	if err != nil {
 		return nil, err
